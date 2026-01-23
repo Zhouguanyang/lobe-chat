@@ -168,15 +168,18 @@ export function defineConfig(customOptions: CustomBetterAuthOptions) {
     session: {
       cookieCache: {
         enabled: true,
-        maxAge: 10 * 60, // Cache duration in seconds
+        maxAge: 5 * 60, // Cache duration in seconds
       },
+      expiresIn: 30 * 24 * 60 * 60,
+      updateAge: 24 * 60 * 60,
     },
     database: drizzleAdapter(serverDB, {
       provider: 'pg',
       // experimental joins feature needs schema to pass full relation
       schema,
     }),
-    secondaryStorage: createSecondaryStorage(),
+    // secondaryStorage: createSecondaryStorage(),
+
     /**
      * Database joins is useful when Better-Auth needs to fetch related data from multiple tables in a single query.
      * Endpoints like /get-session, /get-full-organization and many others benefit greatly from this feature,
