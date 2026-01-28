@@ -2,36 +2,60 @@
 
 import { Flexbox } from '@lobehub/ui';
 import isEqual from 'fast-deep-equal';
-import { MoreHorizontal } from 'lucide-react';
-import React, { memo } from 'react';
-import { useTranslation } from 'react-i18next';
+import React, { memo, useCallback, useEffect, useRef } from 'react';
 
-import NavItem from '@/features/NavPanel/components/NavItem';
 import SkeletonList from '@/features/NavPanel/components/SkeletonList';
 import { useChatStore } from '@/store/chat';
 import { topicSelectors } from '@/store/chat/selectors';
-import { useGlobalStore } from '@/store/global';
-import { systemStatusSelectors } from '@/store/global/selectors';
 
 import TopicItem from '../../List/Item';
 
 const FlatMode = memo(() => {
-  const { t } = useTranslation('topic');
-  const topicPageSize = useGlobalStore(systemStatusSelectors.topicPageSize);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const loadingRef = useRef(false);
 
-  const [activeTopicId, activeThreadId, hasMore, isExpandingPageSize, openAllTopicsDrawer] =
-    useChatStore((s) => [
+  const [activeTopicId, activeThreadId, hasMore, isLoadingMore, loadMoreTopics] = useChatStore(
+    (s) => [
       s.activeTopicId,
       s.activeThreadId,
       topicSelectors.hasMoreTopics(s),
-      topicSelectors.isExpandingPageSize(s),
-      s.openAllTopicsDrawer,
-    ]);
-
-  const activeTopicList = useChatStore(
-    topicSelectors.displayTopicsForSidebar(topicPageSize),
-    isEqual,
+      topicSelectors.isLoadingMoreTopics(s),
+      s.loadMoreTopics,
+    ],
   );
+
+  const activeTopicList = useChatStore(topicSelectors.displayTopics, isEqual);
+
+  // Use IntersectionObserver to detect when sentinel is visible
+  const handleIntersection = useCallback(
+    async (entries: IntersectionObserverEntry[]) => {
+      const [entry] = entries;
+      if (entry?.isIntersecting && hasMore && !loadingRef.current) {
+        loadingRef.current = true;
+	try {
+          await loadMoreTopics();
+        } finally {
+          loadingRef.current = false;
+        }
+      }
+    },
+    [hasMore, loadMoreTopics],
+  );
+
+  // Set up IntersectionObserver
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) return;
+
+    const observer = new IntersectionObserver(handleIntersection, {
+      root: null, // Use viewport as root, will work with any scrollable parent
+      rootMargin: '200px', // Trigger 200px before sentinel is visible
+      threshold: 0,
+    });
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [handleIntersection]);
 
   return (
     <Flexbox gap={1}>
@@ -45,10 +69,13 @@ const FlatMode = memo(() => {
           title={topic.title}
         />
       ))}
-      {isExpandingPageSize && <SkeletonList rows={3} />}
-      {hasMore && !isExpandingPageSize && (
-        <NavItem icon={MoreHorizontal} onClick={openAllTopicsDrawer} title={t('loadMore')} />
+      {isLoadingMore && (
+        <Flexbox paddingBlock={1}>
+          <SkeletonList rows={3} />
+        </Flexbox>
       )}
+      {/* Sentinel element for intersection observer */}
+      {hasMore && <div ref={sentinelRef} style={{ height: 1 }} />}
     </Flexbox>
   );
 });
