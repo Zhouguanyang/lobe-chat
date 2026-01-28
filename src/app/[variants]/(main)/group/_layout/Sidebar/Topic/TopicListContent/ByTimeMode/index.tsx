@@ -2,12 +2,8 @@
 
 import { Accordion, Flexbox } from '@lobehub/ui';
 import isEqual from 'fast-deep-equal';
-import { MoreHorizontal } from 'lucide-react';
 import React, { memo, useMemo } from 'react';
-import { useTranslation } from 'react-i18next';
 
-import NavItem from '@/features/NavPanel/components/NavItem';
-import SkeletonList from '@/features/NavPanel/components/SkeletonList';
 import { useChatStore } from '@/store/chat';
 import { topicSelectors } from '@/store/chat/selectors';
 import { useGlobalStore } from '@/store/global';
@@ -16,16 +12,8 @@ import { systemStatusSelectors } from '@/store/global/selectors';
 import GroupItem from './GroupItem';
 
 const ByTimeMode = memo(() => {
-  const { t } = useTranslation('topic');
-  const topicPageSize = useGlobalStore(systemStatusSelectors.topicPageSize);
-
-  const [hasMore, isExpandingPageSize, openAllTopicsDrawer] = useChatStore((s) => [
-    topicSelectors.hasMoreTopics(s),
-    topicSelectors.isExpandingPageSize(s),
-    s.openAllTopicsDrawer,
-  ]);
   const [activeTopicId, activeThreadId] = useChatStore((s) => [s.activeTopicId, s.activeThreadId]);
-  const groupTopics = useChatStore(topicSelectors.groupedTopicsForSidebar(topicPageSize), isEqual);
+  const groupTopics = useChatStore(topicSelectors.groupedTopicsSelector, isEqual);
 
   const [topicGroupKeys, updateSystemStatus] = useGlobalStore((s) => [
     systemStatusSelectors.topicGroupKeys(s),
@@ -53,10 +41,6 @@ const ByTimeMode = memo(() => {
           />
         ))}
       </Accordion>
-      {isExpandingPageSize && <SkeletonList rows={3} />}
-      {hasMore && !isExpandingPageSize && (
-        <NavItem icon={MoreHorizontal} onClick={openAllTopicsDrawer} title={t('loadMore')} />
-      )}
     </Flexbox>
   );
 });
