@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  REGISTRY_IMAGE: lobehub/lobehub
+  REGISTRY_IMAGE: sun13138/lobehub
 
 jobs:
   build:
