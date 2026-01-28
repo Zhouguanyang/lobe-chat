@@ -16,8 +16,8 @@ import { sessionSelectors } from '@/store/session/selectors';
 const ChatHeaderTitle = memo(() => {
   const { t } = useTranslation(['chat', 'topic']);
   const toggleConfig = useGlobalStore((s) => s.toggleMobileTopic);
-  const [topicLength, topic] = useChatStore((s) => [
-    topicSelectors.currentTopicLength(s),
+  const [topicCount, topic] = useChatStore((s) => [
+    topicSelectors.currentTopicCount(s),
     topicSelectors.currentActiveTopic(s),
   ]);
   const isInbox = useSessionStore(sessionSelectors.isInboxSession);
@@ -62,7 +62,7 @@ const ChatHeaderTitle = memo(() => {
           }}
         >
           {displayTitle}
-          {topicLength > 1 ? `(${topicLength + 1})` : ''}
+          {topicCount > 0 ? ` (${topicCount})` : ''}
         </div>
       }
     />
