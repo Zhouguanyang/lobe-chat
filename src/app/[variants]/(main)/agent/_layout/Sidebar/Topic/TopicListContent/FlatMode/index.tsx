@@ -32,8 +32,11 @@ const FlatMode = memo(() => {
       const [entry] = entries;
       if (entry?.isIntersecting && hasMore && !loadingRef.current) {
         loadingRef.current = true;
-        await loadMoreTopics();
-        loadingRef.current = false;
+	try {
+          await loadMoreTopics();
+        } finally {
+          loadingRef.current = false;
+        }
       }
     },
     [hasMore, loadMoreTopics],
