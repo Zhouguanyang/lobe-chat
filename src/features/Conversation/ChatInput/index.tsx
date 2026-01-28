@@ -2,6 +2,7 @@
 
 import type { SlashOptions } from '@lobehub/editor';
 import { Alert, Flexbox, type MenuProps } from '@lobehub/ui';
+import { browserInfo } from '@lobehub/utils';
 import { type ReactNode, memo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -158,6 +159,7 @@ const ChatInput = memo<ChatInputProps>(
         }}
         leftActions={leftActions}
         mentionItems={mentionItems}
+        mobile={browserInfo.isMobile}
         onMarkdownContentChange={updateInputMessage}
         onSend={handleSend}
         rightActions={rightActions}
