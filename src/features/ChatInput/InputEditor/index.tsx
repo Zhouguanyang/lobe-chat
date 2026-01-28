@@ -37,7 +37,7 @@ const className = cx(css`
 `);
 
 const InputEditor = memo<{ defaultRows?: number }>(({ defaultRows = 2 }) => {
-  const [editor, slashMenuRef, send, updateMarkdownContent, expand, mentionItems] =
+  const [editor, slashMenuRef, send, updateMarkdownContent, expand, mentionItems, mobile] =
     useChatInputStore((s) => [
       s.editor,
       s.slashMenuRef,
@@ -45,6 +45,7 @@ const InputEditor = memo<{ defaultRows?: number }>(({ defaultRows = 2 }) => {
       s.updateMarkdownContent,
       s.expand,
       s.mentionItems,
+      s.mobile,
     ]);
 
   const storeApi = useStoreApi();
@@ -116,7 +117,7 @@ const InputEditor = memo<{ defaultRows?: number }>(({ defaultRows = 2 }) => {
 
   return (
     <Editor
-      autoFocus
+      autoFocus={!mobile}
       className={className}
       content={''}
       editor={editor}
