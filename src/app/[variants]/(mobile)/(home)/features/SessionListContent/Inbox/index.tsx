@@ -5,6 +5,8 @@ import { DEFAULT_INBOX_AVATAR } from '@/const/meta';
 import { INBOX_SESSION_ID } from '@/const/session';
 import { SESSION_CHAT_URL } from '@/const/url';
 import { useNavigateToAgent } from '@/hooks/useNavigateToAgent';
+import { useAgentStore } from '@/store/agent';
+import { builtinAgentSelectors } from '@/store/agent/selectors';
 import { getChatStoreState, useChatStore } from '@/store/chat';
 import { chatSelectors } from '@/store/chat/selectors';
 import { useServerConfigStore } from '@/store/serverConfig';
@@ -16,6 +18,7 @@ const Inbox = memo(() => {
   const mobile = useServerConfigStore((s) => s.isMobile);
   const activeId = useSessionStore((s) => s.activeId);
   const navigateToAgent = useNavigateToAgent();
+  const inboxAgentId = useAgentStore(builtinAgentSelectors.inboxAgentId);
 
   const openNewTopicOrSaveTopic = useChatStore((s) => s.openNewTopicOrSaveTopic);
 
@@ -32,10 +35,10 @@ const Inbox = memo(() => {
             await openNewTopicOrSaveTopic();
           }
         } else {
-          navigateToAgent(INBOX_SESSION_ID);
+          navigateToAgent(inboxAgentId);
         }
       }}
-      to={SESSION_CHAT_URL(INBOX_SESSION_ID, mobile)}
+      to={SESSION_CHAT_URL(inboxAgentId, mobile)}
     >
       <ListItem
         active={activeId === INBOX_SESSION_ID}
