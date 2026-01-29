@@ -17,6 +17,7 @@ const prunePrefixes = ['o1', 'o3', 'o4', 'codex', 'computer-use', 'gpt-5'];
 const oaiSearchContextSize = process.env.OPENAI_SEARCH_CONTEXT_SIZE; // low, medium, high
 const enableServiceTierFlex = process.env.OPENAI_SERVICE_TIER_FLEX === '1';
 const flexSupportedModels = ['gpt-5', 'o3', 'o4-mini']; // Flex tier is only available for these models
+const reasoningContentPrefixes = ['deepseek', 'kimi', 'minimax', 'doubao', 'glm'];
 
 const supportsFlexTier = (model: string) => {
   // Exclude o3-mini, which does not support Flex tier
@@ -26,24 +27,50 @@ const supportsFlexTier = (model: string) => {
   return flexSupportedModels.some((supportedModel) => model.startsWith(supportedModel));
 };
 
+const needsReasoningContent = (model: string) => {
+  return reasoningContentPrefixes.some((prefix) => model.startsWith(prefix));
+};
+
+const transformReasoningToContent = (messages: any[]) => {
+  return messages.map((message: any) => {
+    if (message.reasoning?.content) {
+      const { reasoning, ...restMessage } = message;
+      return {
+        ...restMessage,
+        reasoning_content: reasoning.content,
+      };
+    }
+    if (message.reasoning) {
+      const { reasoning, ...restMessage } = message;
+      return restMessage;
+    }
+    return message;
+  });
+};
+
 export const params = {
   baseURL: 'https://api.openai.com/v1',
   chatCompletion: {
     handlePayload: (payload) => {
       const { enabledSearch, model, ...rest } = payload;
 
+      const messages = needsReasoningContent(model)
+        ? transformReasoningToContent(payload.messages)
+        : payload.messages;
+
       if (responsesAPIModels.has(model) || enabledSearch) {
-        return { ...rest, apiMode: 'responses', enabledSearch, model } as ChatStreamPayload;
+        return { ...rest, apiMode: 'responses', enabledSearch, messages, model } as ChatStreamPayload;
       }
 
       if (prunePrefixes.some((prefix) => model.startsWith(prefix))) {
-        return pruneReasoningPayload(payload) as any;
+        return pruneReasoningPayload({ ...payload, messages }) as any;
       }
 
       if (model.includes('-search-')) {
         return {
           ...rest,
           frequency_penalty: undefined,
+          messages,
           model,
           presence_penalty: undefined,
           stream: payload.stream ?? true,
@@ -60,6 +87,7 @@ export const params = {
 
       return {
         ...rest,
+        messages,
         model,
         ...(enableServiceTierFlex && supportsFlexTier(model) && { service_tier: 'flex' }),
         stream: payload.stream ?? true,
@@ -107,8 +135,8 @@ export const params = {
           reasoning,
           ...(enableServiceTierFlex && supportsFlexTier(model) && { service_tier: 'flex' }),
           stream: payload.stream ?? true,
-          tools: openaiTools as any,
           // computer-use series must set truncation as auto
+          tools: openaiTools as any,
           ...(model.startsWith('computer-use') && { truncation: 'auto' }),
           text: verbosity ? { verbosity } : undefined,
         }) as any;
