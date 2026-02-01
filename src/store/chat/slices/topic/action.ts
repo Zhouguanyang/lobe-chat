@@ -160,7 +160,7 @@ export const chatTopic: StateCreator<
     if (hasTopic) await switchTopic(null);
     else {
       await saveToTopic();
-      refreshMessages();
+      await refreshMessages();
     }
   },
 
