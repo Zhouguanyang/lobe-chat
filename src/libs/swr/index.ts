@@ -66,6 +66,7 @@ export const useActionSWR: SWRHook = (key, fetch, config) =>
     fallbackData: {},
     refreshWhenHidden: false,
     refreshWhenOffline: false,
+    revalidateIfStale: false,
     revalidateOnFocus: false,
     revalidateOnMount: false,
     revalidateOnReconnect: false,
