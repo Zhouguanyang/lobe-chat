@@ -20,7 +20,7 @@ export const VARIABLE_GENERATORS = {
    * | Value | Example |
    * |-------|---------|
    * | `{{date}}` | 12/25/2023 |
-   * | `{{datetime}}` | 12/25/2023, 2:30:45 PM |
+   * | `{{datetime}}` | 2026/02/05 GMT+8 17:57:27 |
    * | `{{day}}` | 25 |
    * | `{{hour}}` | 14 |
    * | `{{iso}}` | 2023-12-25T14:30:45.123Z |
@@ -36,7 +36,18 @@ export const VARIABLE_GENERATORS = {
    *
    */
   date: () => new Date().toLocaleDateString(),
-  datetime: () => new Date().toLocaleString(),
+  datetime: () => 
+    new Date().toLocaleString('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short',
+    }),
   day: () => new Date().getDate().toString().padStart(2, '0'),
   hour: () => new Date().getHours().toString().padStart(2, '0'),
   iso: () => new Date().toISOString(),

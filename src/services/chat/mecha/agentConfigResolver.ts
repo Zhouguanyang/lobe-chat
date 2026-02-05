@@ -228,8 +228,18 @@ export const resolveAgentConfig = (ctx: AgentConfigResolverContext): ResolvedAge
     // Regular agent - use provided plugins if available, fallback to agent's plugins
     const finalPlugins = plugins && plugins.length > 0 ? plugins : basePlugins;
 
+    // Auto-inject model and timestamp headers for custom agents
+    // This ensures all user-created assistants have consistent model/time context
+    const modelTimestampHeader = 'Current model: {{model}}\nCurrent time: {{datetime}}\n\n';
+    const systemRoleWithHeaders = agentConfig.systemRole
+      ? `${modelTimestampHeader}${agentConfig.systemRole}`
+      : modelTimestampHeader;
+
     // Apply params adjustments based on chatConfig
-    let finalAgentConfig = applyParamsFromChatConfig(agentConfig, chatConfig);
+    let finalAgentConfig = applyParamsFromChatConfig(
+      { ...agentConfig, systemRole: systemRoleWithHeaders },
+      chatConfig,
+    );
     let finalChatConfig = chatConfig;
 
     // === Page Editor Auto-Injection ===
@@ -245,13 +255,13 @@ export const resolveAgentConfig = (ctx: AgentConfigResolverContext): ResolvedAge
       const pageAgentRuntime = getAgentRuntimeConfig(BUILTIN_AGENT_SLUGS.pageAgent, {});
       const pageAgentSystemRole = pageAgentRuntime?.systemRole || '';
 
-      // 3. Merge system roles: custom agent's role + page-agent role
+      // 3. Merge system roles: custom agent's role (with headers) + page-agent role
       // Only append page-agent role if it exists
       const mergedSystemRole = pageAgentSystemRole
-        ? agentConfig.systemRole
-          ? `${agentConfig.systemRole}\n\n${pageAgentSystemRole}`
+        ? systemRoleWithHeaders
+          ? `${systemRoleWithHeaders}\n\n${pageAgentSystemRole}`
           : pageAgentSystemRole
-        : agentConfig.systemRole || '';
+        : systemRoleWithHeaders;
 
       finalAgentConfig = {
         ...finalAgentConfig,

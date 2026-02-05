@@ -48,6 +48,49 @@ describe('resolveAgentConfig', () => {
       expect(result.isBuiltinAgent).toBe(false);
     });
 
+    it('should auto-inject model and timestamp headers for custom agents', () => {
+      const result = resolveAgentConfig({ agentId: 'test-agent' });
+
+      expect(result.agentConfig.systemRole).toContain('Current model: {{model}}');
+      expect(result.agentConfig.systemRole).toContain('Current time: {{datetime}}');
+      expect(result.agentConfig.systemRole).toBe(
+        'Current model: {{model}}\nCurrent time: {{datetime}}\n\nYou are a helpful assistant',
+      );
+      expect(result.isBuiltinAgent).toBe(false);
+    });
+
+    it('should prepend headers even when systemRole is empty', () => {
+      vi.spyOn(agentSelectors.agentSelectors, 'getAgentConfigById').mockReturnValue(
+        () =>
+          ({
+            ...mockAgentConfig,
+            systemRole: '',
+          }) as any,
+      );
+
+      const result = resolveAgentConfig({ agentId: 'test-agent' });
+
+      expect(result.agentConfig.systemRole).toBe(
+        'Current model: {{model}}\nCurrent time: {{datetime}}\n\n',
+      );
+    });
+
+    it('should prepend headers when systemRole is undefined', () => {
+      vi.spyOn(agentSelectors.agentSelectors, 'getAgentConfigById').mockReturnValue(
+        () =>
+          ({
+            ...mockAgentConfig,
+            systemRole: undefined,
+          }) as any,
+      );
+
+      const result = resolveAgentConfig({ agentId: 'test-agent' });
+
+      expect(result.agentConfig.systemRole).toBe(
+        'Current model: {{model}}\nCurrent time: {{datetime}}\n\n',
+      );
+    });
+
     it('should treat agent with non-builtin slug as regular agent', () => {
       // Agent has a random slug that is NOT a valid builtin agent slug
       vi.spyOn(agentSelectors.agentSelectors, 'getAgentSlugById').mockReturnValue(
@@ -105,7 +148,10 @@ describe('resolveAgentConfig', () => {
     it('should return agent config and chat config correctly', () => {
       const result = resolveAgentConfig({ agentId: 'test-agent' });
 
-      expect(result.agentConfig).toEqual(mockAgentConfig);
+      // Custom agents now have model/timestamp headers prepended
+      expect(result.agentConfig.systemRole).toBe(
+        'Current model: {{model}}\nCurrent time: {{datetime}}\n\nYou are a helpful assistant',
+      );
       expect(result.chatConfig).toEqual(mockChatConfig);
     });
 
@@ -555,10 +601,13 @@ describe('resolveAgentConfig', () => {
         scope: 'page',
       });
 
+      // Custom agents now have model/timestamp headers prepended
+      expect(result.agentConfig.systemRole).toContain('Current model: {{model}}');
+      expect(result.agentConfig.systemRole).toContain('Current time: {{datetime}}');
       expect(result.agentConfig.systemRole).toContain('You are a helpful assistant');
       expect(result.agentConfig.systemRole).toContain('Page agent system prompt');
       expect(result.agentConfig.systemRole).toMatch(
-        /You are a helpful assistant\n\nPage agent system prompt/,
+        /Current model: {{model}}\nCurrent time: {{datetime}}\n\nYou are a helpful assistant\n\nPage agent system prompt/,
       );
     });
 
@@ -576,8 +625,9 @@ describe('resolveAgentConfig', () => {
         scope: 'page',
       });
 
+      // Even with empty systemRole, headers are still prepended
       expect(result.agentConfig.systemRole).toBe(
-        'Page agent system prompt with XML instructions...',
+        'Current model: {{model}}\nCurrent time: {{datetime}}\n\n\n\nPage agent system prompt with XML instructions...',
       );
     });
 
@@ -674,7 +724,10 @@ describe('resolveAgentConfig', () => {
 
       // Should still inject PageAgentIdentifier but with empty systemRole
       expect(result.plugins).toContain(PageAgentIdentifier);
-      expect(result.agentConfig.systemRole.trim()).toBe('You are a helpful assistant');
+      // Custom agents now have model/timestamp headers prepended
+      expect(result.agentConfig.systemRole).toBe(
+        'Current model: {{model}}\nCurrent time: {{datetime}}\n\nYou are a helpful assistant',
+      );
       expect(result.chatConfig.enableHistoryCount).toBe(false);
     });
 
@@ -690,7 +743,10 @@ describe('resolveAgentConfig', () => {
       });
 
       expect(result.plugins).toContain(PageAgentIdentifier);
-      expect(result.agentConfig.systemRole.trim()).toBe('You are a helpful assistant');
+      // Custom agents now have model/timestamp headers prepended
+      expect(result.agentConfig.systemRole).toBe(
+        'Current model: {{model}}\nCurrent time: {{datetime}}\n\nYou are a helpful assistant',
+      );
       expect(result.chatConfig.enableHistoryCount).toBe(false);
     });
 
@@ -1165,7 +1221,10 @@ describe('resolveAgentConfig', () => {
 
       // Only plugins should be empty, other config should be preserved
       expect(result.plugins).toEqual([]);
-      expect(result.agentConfig).toEqual(mockAgentConfig);
+      // Custom agents now have model/timestamp headers prepended
+      expect(result.agentConfig.systemRole).toBe(
+        'Current model: {{model}}\nCurrent time: {{datetime}}\n\nYou are a helpful assistant',
+      );
       expect(result.chatConfig).toEqual(mockChatConfig);
       expect(result.isBuiltinAgent).toBe(false);
     });
