@@ -420,7 +420,7 @@ export class ChatTopicActionImpl {
     );
 
     try {
-      const pageSize = useGlobalStore.getState().status.topicPageSize || 20;
+      const pageSize = useGlobalStore.getState().status.topicPageSize || 40;
       const excludeTriggers = currentData?.excludeTriggers;
       const result = await topicService.getTopics({
         agentId: activeAgentId,
