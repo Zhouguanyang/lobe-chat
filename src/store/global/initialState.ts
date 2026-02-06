@@ -241,7 +241,7 @@ export const INITIAL_STATUS = {
   showSystemRole: false,
   systemRoleExpandedMap: {},
   tokenDisplayFormatShort: true,
-  topicPageSize: 20,
+  topicPageSize: 40,
   zenMode: false,
 } satisfies SystemStatus;
 
