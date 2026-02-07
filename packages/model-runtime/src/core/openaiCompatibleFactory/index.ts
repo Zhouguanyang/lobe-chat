@@ -114,6 +114,15 @@ export interface OpenAICompatibleFactoryOptions<T extends Record<string, any> = 
     chatCompletion: () => boolean;
     responses?: () => boolean;
   };
+  /**
+   * Embeddings API configuration
+   */
+  embeddings?: {
+    /**
+     * If true, the `user` parameter will not be sent to the API
+     */
+    noUserId?: boolean;
+  };
   errorType?: {
     bizError: ILobeAgentRuntimeErrorType;
     invalidAPIKey: ILobeAgentRuntimeErrorType;
@@ -143,7 +152,14 @@ export interface OpenAICompatibleFactoryOptions<T extends Record<string, any> = 
         transformModel?: (model: OpenAI.Model) => ChatModelCard;
       };
   provider: string;
+  /**
+   * Responses API configuration
+   */
   responses?: {
+    /**
+     * If true, the `user` parameter will not be sent to the API
+     */
+    noUserId?: boolean;
     handlePayload?: (
       payload: ChatStreamPayload,
       options: ConstructorOptions<T>,
@@ -164,6 +180,7 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
   responses,
   createImage: customCreateImage,
   generateObject: generateObjectConfig,
+  embeddings: embeddingsConfig,
 }: OpenAICompatibleFactoryOptions<T>) => {
   const ErrorType = {
     bizError: errorType?.bizError || AgentRuntimeErrorType.ProviderBizError,
@@ -589,6 +606,11 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
         !!schema,
       );
 
+      const instanceChat = ((this._options as any).chatCompletion || {}) as {
+        noUserId?: boolean;
+      };
+      const noUserIdForChat = instanceChat.noUserId ?? chatCompletion?.noUserId;
+
       if (tools) {
         log('using tools-based generation');
         return this.generateObjectWithTools(payload, options);
@@ -622,7 +644,7 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
             model,
             tool_choice: { function: { name: tool.function.name }, type: 'function' },
             tools: [tool],
-            user: options?.user,
+            ...(noUserIdForChat ? {} : { user: options?.user }),
           },
           { headers: options?.headers, signal: options?.signal },
         );
@@ -666,12 +688,18 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
 
       if (shouldUseResponses) {
         log('calling responses.create for structured output');
+
+        const instanceResponses = ((this._options as any).responses || {}) as {
+          noUserId?: boolean;
+        };
+        const noUserIdForResponses = instanceResponses.noUserId ?? responses?.noUserId;
+
         const res = await this.client!.responses.create(
           {
             input: messages,
             model,
             text: { format: { strict: true, type: 'json_schema', ...processedSchema } },
-            user: options?.user,
+            ...(noUserIdForResponses ? {} : { user: options?.user }),
           },
           { headers: options?.headers, signal: options?.signal },
         );
@@ -695,7 +723,7 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
           messages,
           model,
           response_format: { json_schema: processedSchema, type: 'json_schema' },
-          user: options?.user,
+          ...(noUserIdForChat ? {} : { user: options?.user }),
         },
         { headers: options?.headers, signal: options?.signal },
       );
@@ -725,9 +753,18 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
         Array.isArray(payload.input) ? payload.input.length : 1,
       );
 
+      const instanceEmbeddings = ((this._options as any).embeddings || {}) as {
+        noUserId?: boolean;
+      };
+      const noUserId = instanceEmbeddings.noUserId ?? embeddingsConfig?.noUserId;
+
       try {
         const res = await this.client.embeddings.create(
-          { ...payload, encoding_format: 'float', user: options?.user },
+          { 
+            ...payload, 
+            encoding_format: 'float', 
+            ...(noUserId ? {} : { user: options?.user }),
+          },
           { headers: options?.headers, signal: options?.signal },
         );
 
@@ -884,6 +921,11 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
         forceImageBase64: chatCompletion?.forceImageBase64,
       });
 
+      const instanceResponses = ((this._options as any).responses || {}) as {
+        noUserId?: boolean;
+      };
+      const noUserId = instanceResponses.noUserId ?? responses?.noUserId;
+
       const isStreaming = payload.stream !== false;
       log(
         'isStreaming: %s, hasTools: %s, hasReasoning: %s',
@@ -907,6 +949,7 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
         store: false,
         stream: !isStreaming ? undefined : isStreaming,
         tools: tools?.map((tool) => this.convertChatCompletionToolToResponseTool(tool)),
+        ...(noUserId ? {} : { user: options?.user }),
       } as OpenAI.Responses.ResponseCreateParamsStreaming | OpenAI.Responses.ResponseCreateParams;
 
       if (debugParams?.responses?.()) {
@@ -1015,13 +1058,18 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
           forceImageBase64: chatCompletion?.forceImageBase64,
         });
 
+        const instanceResponses = ((this._options as any).responses || {}) as {
+          noUserId?: boolean;
+        };
+        const noUserId = instanceResponses.noUserId ?? responses?.noUserId;
+
         const res = await this.client.responses.create(
           {
             input,
             model,
             tool_choice: 'required',
             tools: tools!.map((tool) => this.convertChatCompletionToolToResponseTool(tool)),
-            user: options?.user,
+            ...(noUserId ? {} : { user: options?.user }),
           },
           { headers: options?.headers, signal: options?.signal },
         );
@@ -1051,13 +1099,18 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
       log('calling chat.completions.create for tool calling');
       const msgs = messages;
 
+      const instanceChat = ((this._options as any).chatCompletion || {}) as {
+        noUserId?: boolean;
+      };
+      const noUserIdForChat = instanceChat.noUserId ?? chatCompletion?.noUserId;
+
       const res = await this.client.chat.completions.create(
         {
           messages: msgs,
           model,
           tool_choice: 'required',
           tools,
-          user: options?.user,
+          ...(noUserIdForChat ? {} : { user: options?.user }),
         },
         { headers: options?.headers, signal: options?.signal },
       );
