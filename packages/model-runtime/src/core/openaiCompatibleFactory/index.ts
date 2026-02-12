@@ -20,6 +20,7 @@ import type {
   EmbeddingsPayload,
   GenerateObjectOptions,
   GenerateObjectPayload,
+  OpenAIChatMessage,
   TextToSpeechOptions,
   TextToSpeechPayload,
 } from '../../types';
@@ -55,6 +56,30 @@ export const CHAT_MODELS_BLOCK_LIST = [
   'whisper',
   'dall-e',
 ];
+
+const CHATGPT_SYSTEM_APPEND_MARKER =
+  'IMPORTANT: You must format your entire response using Markdown syntax.';
+const CHATGPT_SYSTEM_APPEND_PROMPT = [
+  CHATGPT_SYSTEM_APPEND_MARKER,
+  'Requirements:',
+  '- Use headings (prefer ### or ####; use ## only for major sections; avoid # entirely) **only when it improves readability**',
+  '- Use bullet points (-) or numbered lists (1.) for enumeration',
+  '- Use ```language for code blocks with language tags',
+  '- Use **bold** for emphasis',
+  '- Use | for tables when comparing data',
+  '- Never return large blocks of plain text without formatting',
+  'Exception: For trivial greetings or single-sentence acknowledgments, minimal formatting is acceptable.',
+  'Exception for tool calls: When calling functions/tools, prioritize correct JSON/structured format. Markdown formatting should not interfere with tool parameter syntax.',
+].join('\n');
+
+interface SystemPromptContentPart {
+  text?: string;
+  type: string;
+}
+
+type SystemPromptContent = string | SystemPromptContentPart[] | null | undefined;
+
+type SystemPromptMessage = OpenAI.ChatCompletionMessageParam | OpenAIChatMessage;
 
 type ConstructorOptions<T extends Record<string, any> = any> = ClientOptions & T;
 export type CreateImageOptions = Omit<ClientOptions, 'apiKey'> & {
@@ -159,14 +184,14 @@ export interface OpenAICompatibleFactoryOptions<T extends Record<string, any> = 
    * Responses API configuration
    */
   responses?: {
-    /**
-     * If true, the `user` parameter will not be sent to the API
-     */
-    noUserId?: boolean;
     handlePayload?: (
       payload: ChatStreamPayload,
       options: ConstructorOptions<T>,
     ) => ChatStreamPayload;
+    /**
+     * If true, the `user` parameter will not be sent to the API
+     */
+    noUserId?: boolean;
   };
 }
 
@@ -321,9 +346,82 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
       return false;
     }
 
+    private isChatGPTModel(model: string | undefined): boolean {
+      return typeof model === 'string' && model.toLowerCase().startsWith('chatgpt');
+    }
+
     private shouldOmitUserId(model: string | undefined, noUserIdFlag?: boolean): boolean {
       if (noUserIdFlag) return true;
-      return typeof model === 'string' && model.toLowerCase().startsWith('chatgpt');
+      return this.isChatGPTModel(model);
+    }
+
+    private appendMarkdownSystemPrompt<T extends SystemPromptMessage>(
+      messages: T[],
+      model?: string,
+    ): T[] {
+      if (!this.isChatGPTModel(model)) return messages;
+
+      const systemIndex = this.findLastSystemMessageIndex(messages);
+      if (systemIndex === -1) return messages;
+
+      const systemMessage = messages[systemIndex];
+      const nextContent = this.appendMarkdownToSystemContent(systemMessage.content);
+
+      if (nextContent === systemMessage.content) return messages;
+
+      const nextMessages = messages.slice();
+      nextMessages[systemIndex] = { ...systemMessage, content: nextContent } as T;
+      return nextMessages;
+    }
+
+    private findLastSystemMessageIndex(messages: SystemPromptMessage[]): number {
+      for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const role = messages[i]?.role;
+        if (role === 'system' || role === 'developer') return i;
+      }
+
+      return -1;
+    }
+
+    private appendMarkdownToSystemContent(content: SystemPromptContent): SystemPromptContent {
+      if (content === undefined || content === null) return CHATGPT_SYSTEM_APPEND_PROMPT;
+
+      if (typeof content === 'string') {
+        if (content.includes(CHATGPT_SYSTEM_APPEND_MARKER)) return content;
+
+        const separator = content && !content.endsWith('\n') ? '\n\n' : '\n';
+        return `${content}${separator}${CHATGPT_SYSTEM_APPEND_PROMPT}`;
+      }
+
+      if (!Array.isArray(content)) return content;
+
+      const parts = content as SystemPromptContentPart[];
+      const hasMarker = parts.some(
+        (part) =>
+          part.type === 'text' &&
+          'text' in part &&
+          typeof part.text === 'string' &&
+          part.text.includes(CHATGPT_SYSTEM_APPEND_MARKER),
+      );
+
+      if (hasMarker) return content;
+
+      const nextContent = parts.slice();
+      const lastPart = nextContent.at(-1);
+      const appendText = CHATGPT_SYSTEM_APPEND_PROMPT;
+
+      if (lastPart?.type === 'text') {
+        const existingText = lastPart.text || '';
+        const separator = existingText && !existingText.endsWith('\n') ? '\n\n' : '\n';
+        nextContent[nextContent.length - 1] = {
+          ...lastPart,
+          text: `${existingText}${separator}${appendText}`,
+        };
+        return nextContent;
+      }
+
+      nextContent.push({ text: appendText, type: 'text' });
+      return nextContent;
     }
 
     async chat({ responseMode, ...payload }: ChatStreamPayload, options?: ChatMethodOptions) {
@@ -338,9 +436,9 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
         const modelId = (payload as any).model as string | undefined;
 
         const instanceChat = ((this._options as any).chatCompletion || {}) as {
+          noUserId?: boolean;
           useResponse?: boolean;
           useResponseModels?: Array<string | RegExp>;
-          noUserId?: boolean;
         };
         const flagUseResponse =
           instanceChat.useResponse ?? (chatCompletion ? chatCompletion.useResponse : undefined);
@@ -419,7 +517,9 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
           this.baseURL = targetBaseURL;
         }
 
-        const messages = await convertOpenAIMessages(postPayload.messages, {
+        const postMessages = this.appendMarkdownSystemPrompt(postPayload.messages, modelId);
+
+        const messages = await convertOpenAIMessages(postMessages, {
           forceImageBase64: chatCompletion?.forceImageBase64,
         });
 
@@ -437,9 +537,13 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
 
         if (customClient?.createChatCompletionStream) {
           log('using custom client for chat completion stream');
+          const customPayload = {
+            ...processedPayload,
+            messages: this.appendMarkdownSystemPrompt(processedPayload.messages, modelId),
+          };
           response = customClient.createChatCompletionStream(
             this.client,
-            processedPayload,
+            customPayload,
             this,
           ) as any;
         } else {
@@ -930,10 +1034,19 @@ export const createOpenAICompatibleRuntime = <T extends Record<string, any> = an
 
       const inputStartAt = Date.now();
 
-      const { messages, reasoning_effort, tools, reasoning, responseMode, max_tokens, ...res } =
-        responses?.handlePayload
-          ? (responses?.handlePayload(payload, this._options) as ChatStreamPayload)
-          : payload;
+      const {
+        messages: rawMessages,
+        reasoning_effort,
+        tools,
+        reasoning,
+        responseMode,
+        max_tokens,
+        ...res
+      } = responses?.handlePayload
+        ? (responses?.handlePayload(payload, this._options) as ChatStreamPayload)
+        : payload;
+
+      const messages = this.appendMarkdownSystemPrompt(rawMessages, payload.model);
 
       // remove penalty params and chat completion specific params
       delete res.apiMode;
