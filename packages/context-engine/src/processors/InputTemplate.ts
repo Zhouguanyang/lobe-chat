@@ -37,35 +37,48 @@ export class InputTemplateProcessor extends BaseProcessor {
     let processedCount = 0;
 
     try {
+      // Convert the literal \n to a real newline character
+      const normalizedTemplate = this.config.inputTemplate
+        .replaceAll('\\n', '\n')
+        .replaceAll('\\t', '\t');
+
+      log('Normalized template: %s', JSON.stringify(normalizedTemplate));
+
       // Compile the template
-      const compiler = template(this.config.inputTemplate, {
+      const compiler = template(normalizedTemplate, {
         interpolate: /{{\s*(text)\s*}}/g,
       });
 
-      log(`Applying input template: ${this.config.inputTemplate}`);
+      log(`Applying input template: ${normalizedTemplate}`);
 
-      // Process each message
-      for (let i = 0; i < clonedContext.messages.length; i++) {
-        const message = clonedContext.messages[i];
+      // Find the last user message index
+      let lastUserMessageIndex = -1;
+      for (let i = clonedContext.messages.length - 1; i >= 0; i--) {
+        if (clonedContext.messages[i].role === 'user') {
+          lastUserMessageIndex = i;
+          break;
+        }
+      }
 
-        // Only apply template to user messages
-        if (message.role === 'user') {
-          try {
-            const originalContent = message.content;
-            const processedContent = compiler({ text: originalContent });
+      // Process only the last user message
+      if (lastUserMessageIndex !== -1) {
+        const message = clonedContext.messages[lastUserMessageIndex];
 
-            if (processedContent !== originalContent) {
-              clonedContext.messages[i] = {
-                ...message,
-                content: processedContent,
-              };
-              processedCount++;
-              log(`Applied template to message ${message.id}`);
-            }
-          } catch (error) {
-            log.extend('error')(`Error applying template to message ${message.id}: ${error}`);
-            // Keep original message on error
+        try {
+          const originalContent = message.content;
+          const processedContent = compiler({ text: originalContent });
+
+          if (processedContent !== originalContent) {
+            clonedContext.messages[lastUserMessageIndex] = {
+              ...message,
+              content: processedContent,
+            };
+            processedCount++;
+            log(`Applied template to last user message ${message.id}`);
           }
+        } catch (error) {
+          log.extend('error')(`Error applying template to message ${message.id}: ${error}`);
+          // Keep original message on error
         }
       }
     } catch (error) {

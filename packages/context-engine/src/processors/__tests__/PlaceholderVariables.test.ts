@@ -184,7 +184,7 @@ describe('PlaceholderVariablesProcessor', () => {
   });
 
   describe('PlaceholderVariablesProcessor', () => {
-    it('should process messages through the processor', async () => {
+    it('should process only the last user message through the processor', async () => {
       const processor = new PlaceholderVariablesProcessor({
         variableGenerators: mockVariableGenerators,
       });
@@ -331,6 +331,115 @@ describe('PlaceholderVariablesProcessor', () => {
       const result = await processor.process(context);
 
       expect(result.metadata.placeholderVariablesProcessed).toBe(0);
+    });
+
+    it('should only process the last user message, not historical messages', async () => {
+      const processor = new PlaceholderVariablesProcessor({
+        variableGenerators: mockVariableGenerators,
+      });
+
+      const context = {
+        initialState: {
+          messages: [],
+          model: 'gpt-4',
+          provider: 'openai',
+          systemRole: '',
+          tools: [],
+        },
+        messages: [
+          {
+            id: '1',
+            role: 'user',
+            content: 'First message with {{username}}',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+          {
+            id: '2',
+            role: 'assistant',
+            content: 'Assistant response',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+          {
+            id: '3',
+            role: 'user',
+            content: 'Second message with {{date}}',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ],
+        metadata: {
+          model: 'gpt-4',
+          maxTokens: 4096,
+        },
+        isAborted: false,
+        executedProcessors: [],
+      };
+
+      const result = await processor.process(context);
+
+      // Historical user message should remain unchanged
+      expect(result.messages[0].content).toBe('First message with {{username}}');
+      // Assistant message should remain unchanged
+      expect(result.messages[1].content).toBe('Assistant response');
+      // Only the last user message should be processed
+      expect(result.messages[2].content).toBe('Second message with 2023-12-25');
+      expect(result.metadata.placeholderVariablesProcessed).toBe(1);
+    });
+
+    it('should handle multi-turn conversation correctly', async () => {
+      const processor = new PlaceholderVariablesProcessor({
+        variableGenerators: mockVariableGenerators,
+      });
+
+      const context = {
+        initialState: {
+          messages: [],
+          model: 'gpt-4',
+          provider: 'openai',
+          systemRole: '',
+          tools: [],
+        },
+        messages: [
+          {
+            id: '1',
+            role: 'user',
+            content: 'Hello {{username}}',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+          {
+            id: '2',
+            role: 'assistant',
+            content: 'Hi!',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+          {
+            id: '3',
+            role: 'user',
+            content: 'What is the {{time}}?',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ],
+        metadata: {
+          model: 'gpt-4',
+          maxTokens: 4096,
+        },
+        isAborted: false,
+        executedProcessors: [],
+      };
+
+      const result = await processor.process(context);
+
+      // Historical messages unchanged
+      expect(result.messages[0].content).toBe('Hello {{username}}');
+      expect(result.messages[1].content).toBe('Hi!');
+      // Latest user message processed
+      expect(result.messages[2].content).toBe('What is the 14:30:45?');
+      expect(result.metadata.placeholderVariablesProcessed).toBe(1);
     });
   });
 

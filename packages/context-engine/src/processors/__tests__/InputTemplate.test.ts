@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { InputTemplateProcessor } from '../InputTemplate';
 
 describe('InputTemplateProcessor', () => {
-  it('should apply template to user messages', async () => {
+  it('should apply template only to the last user message', async () => {
     const processor = new InputTemplateProcessor({
       inputTemplate: 'Template: {{text}} - End',
     });
@@ -190,7 +190,7 @@ describe('InputTemplateProcessor', () => {
     expect(result.metadata.inputTemplateProcessed).toBe(0);
   });
 
-  it('should only process user messages, not assistant messages', async () => {
+  it('should only process the last user message, not historical messages or assistant messages', async () => {
     const processor = new InputTemplateProcessor({
       inputTemplate: 'Processed: {{text}}',
     });
@@ -207,7 +207,7 @@ describe('InputTemplateProcessor', () => {
         {
           id: '1',
           role: 'user',
-          content: 'User message',
+          content: 'First user message',
           createdAt: Date.now(),
           updatedAt: Date.now(),
         },
@@ -220,6 +220,13 @@ describe('InputTemplateProcessor', () => {
         },
         {
           id: '3',
+          role: 'user',
+          content: 'Second user message',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+        {
+          id: '4',
           role: 'system',
           content: 'System message',
           createdAt: Date.now(),
@@ -235,9 +242,61 @@ describe('InputTemplateProcessor', () => {
 
     const result = await processor.process(context);
 
-    expect(result.messages[0].content).toBe('Processed: User message');
+    expect(result.messages[0].content).toBe('First user message'); // Historical user message - unchanged
     expect(result.messages[1].content).toBe('Assistant message'); // Unchanged
-    expect(result.messages[2].content).toBe('System message'); // Unchanged
+    expect(result.messages[2].content).toBe('Processed: Second user message'); // Last user message - processed
+    expect(result.messages[3].content).toBe('System message'); // Unchanged
+    expect(result.metadata.inputTemplateProcessed).toBe(1);
+  });
+
+  it('should handle multi-turn conversation correctly', async () => {
+    const processor = new InputTemplateProcessor({
+      inputTemplate: '[{{text}}]',
+    });
+
+    const context = {
+      initialState: {
+        messages: [],
+        model: 'gpt-4',
+        provider: 'openai',
+        systemRole: '',
+        tools: [],
+      },
+      messages: [
+        {
+          id: '1',
+          role: 'user',
+          content: 'Hello',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+        {
+          id: '2',
+          role: 'assistant',
+          content: 'Hi!',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+        {
+          id: '3',
+          role: 'user',
+          content: 'What time is it?',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        },
+      ],
+      metadata: {
+        model: 'gpt-4',
+        maxTokens: 4096,
+      },
+      isAborted: false,
+    };
+
+    const result = await processor.process(context);
+
+    expect(result.messages[0].content).toBe('Hello'); // Historical - unchanged
+    expect(result.messages[1].content).toBe('Hi!'); // Historical - unchanged
+    expect(result.messages[2].content).toBe('[What time is it?]'); // Latest - processed
     expect(result.metadata.inputTemplateProcessed).toBe(1);
   });
 });

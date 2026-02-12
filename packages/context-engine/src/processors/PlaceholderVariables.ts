@@ -56,6 +56,8 @@ export interface PlaceholderVariablesConfig {
   depth?: number;
   /** Variable generators mapping, key is variable name, value is generator function */
   variableGenerators: Record<string, () => string>;
+  /** Whether to process system messages, default is true */
+  processSystemMessages?: boolean;
 }
 
 /**
@@ -185,6 +187,7 @@ export const parsePlaceholderVariablesMessages = (
 /**
  * PlaceholderVariables Processor
  * Responsible for handling placeholder variable replacement in messages
+ * Processes both system messages and the last user message
  */
 export class PlaceholderVariablesProcessor extends BaseProcessor {
   readonly name = 'PlaceholderVariablesProcessor';
@@ -201,19 +204,66 @@ export class PlaceholderVariablesProcessor extends BaseProcessor {
 
     let processedCount = 0;
     const depth = this.config.depth ?? 2;
+    const processSystemMessages = this.config.processSystemMessages ?? true;
 
     log(
       `Starting placeholder variables processing with ${Object.keys(this.config.variableGenerators).length} generators`,
     );
     log('Generator keys: %o', Object.keys(this.config.variableGenerators));
 
-    // Process placeholder variables for each message
-    for (let i = 0; i < clonedContext.messages.length; i++) {
-      const message = clonedContext.messages[i];
+    // Process system messages first (if enabled)
+    if (processSystemMessages) {
+      for (let i = 0; i < clonedContext.messages.length; i++) {
+        const message = clonedContext.messages[i];
+
+        // Process all system messages
+        if (message.role === 'system') {
+          log(
+            'Processing system message %d: contentType=%s, contentPreview=%s',
+            i,
+            typeof message.content,
+            typeof message.content === 'string'
+              ? message.content.slice(0, 200)
+              : JSON.stringify(message.content).slice(0, 200),
+          );
+
+          try {
+            const originalMessage = JSON.stringify(message);
+            const processedMessage = this.processMessagePlaceholders(message, depth);
+
+            if (JSON.stringify(processedMessage) !== originalMessage) {
+              clonedContext.messages[i] = processedMessage;
+              processedCount++;
+              log(`Processed placeholders in system message ${message.id || i}`);
+            } else {
+              log(`No placeholders found/replaced in system message ${message.id || i}`);
+            }
+          } catch (error) {
+            log.extend('error')(
+              `Error processing placeholders in system message ${message.id || i}: ${error}`,
+            );
+            // Continue processing
+          }
+        }
+      }
+    }
+
+    // Find the last user message index
+    let lastUserMessageIndex = -1;
+    for (let i = clonedContext.messages.length - 1; i >= 0; i--) {
+      if (clonedContext.messages[i].role === 'user') {
+        lastUserMessageIndex = i;
+        break;
+      }
+    }
+
+    // Process placeholder variables only for the last user message
+    if (lastUserMessageIndex !== -1) {
+      const message = clonedContext.messages[lastUserMessageIndex];
 
       log(
-        'Processing message %d: role=%s, contentType=%s, contentPreview=%s',
-        i,
+        'Processing last user message %d: role=%s, contentType=%s, contentPreview=%s',
+        lastUserMessageIndex,
         message.role,
         typeof message.content,
         typeof message.content === 'string'
@@ -226,15 +276,15 @@ export class PlaceholderVariablesProcessor extends BaseProcessor {
         const processedMessage = this.processMessagePlaceholders(message, depth);
 
         if (JSON.stringify(processedMessage) !== originalMessage) {
-          clonedContext.messages[i] = processedMessage;
+          clonedContext.messages[lastUserMessageIndex] = processedMessage;
           processedCount++;
-          log(`Processed placeholders in message ${message.id}, role: ${message.role}`);
+          log(`Processed placeholders in last user message ${message.id}`);
         } else {
-          log(`No placeholders found/replaced in message ${message.id}, role: ${message.role}`);
+          log(`No placeholders found/replaced in last user message ${message.id}`);
         }
       } catch (error) {
         log.extend('error')(`Error processing placeholders in message ${message.id}: ${error}`);
-        // Continue processing other messages
+        // Continue processing
       }
     }
 

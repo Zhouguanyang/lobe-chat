@@ -10,7 +10,19 @@ import { type ServerMessagesEngineParams } from './types';
 const createServerVariableGenerators = (model?: string, provider?: string) => ({
   // Time-related variables
   date: () => new Date().toLocaleDateString('en-US', { dateStyle: 'full' }),
-  datetime: () => new Date().toISOString(),
+  datetime: () =>
+    new Date().toLocaleString('en-US', {
+      timeZone: 'Asia/Shanghai',
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      weekday: 'long',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short',
+    }),
   time: () => new Date().toLocaleTimeString('en-US', { timeStyle: 'medium' }),
   /* eslint-disable sort-keys-fix/sort-keys-fix */
   // Model-related variables
