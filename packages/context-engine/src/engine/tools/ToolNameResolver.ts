@@ -78,19 +78,23 @@ export class ToolNameResolver {
           }
         }
 
+        const manifest = manifests[identifier];
+        // Prefer manifest type when available to avoid mismatched routing caused by stale
+        // or inconsistent tool-call suffixes (e.g. "____default" for builtin tools).
+        const resolvedType = manifest?.type ?? type ?? 'default';
+
         const payload: ChatToolPayload = {
           apiName,
           arguments: toolCall.function.arguments,
           id: toolCall.id,
           identifier,
           thoughtSignature: toolCall.thoughtSignature,
-          type: (type ?? 'default') as any,
+          type: resolvedType as any,
         };
 
         // Step 2: Resolve hashed apiName if needed
-        if (apiName.startsWith(PLUGIN_SCHEMA_API_MD5_PREFIX) && manifests[identifier]) {
+        if (apiName.startsWith(PLUGIN_SCHEMA_API_MD5_PREFIX) && manifest) {
           const md5 = apiName.replace(PLUGIN_SCHEMA_API_MD5_PREFIX, '');
-          const manifest = manifests[identifier];
 
           const api = manifest?.api.find(
             (api: LobeChatPluginApi) => this.genHash(api.name) === md5,

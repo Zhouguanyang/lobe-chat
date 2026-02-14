@@ -220,6 +220,60 @@ describe('ToolNameResolver', () => {
       expect(result[0].type).toBe('default');
     });
 
+    it('should infer manifest type when tool name has no type suffix', () => {
+      const toolCalls = [
+        {
+          function: {
+            arguments: '{"query":"latest ai news"}',
+            name: 'lobe-web-browsing____search',
+          },
+          id: 'call_1',
+          type: 'function',
+        },
+      ];
+
+      const manifests = {
+        'lobe-web-browsing': {
+          api: [{ description: 'Search web pages', name: 'search', parameters: {} }],
+          identifier: 'lobe-web-browsing',
+          meta: {},
+          type: 'builtin' as const,
+        },
+      };
+
+      const result = resolver.resolve(toolCalls, manifests);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].type).toBe('builtin');
+    });
+
+    it('should prefer manifest type when tool-call suffix type is inconsistent', () => {
+      const toolCalls = [
+        {
+          function: {
+            arguments: '{"query":"latest ai news"}',
+            name: 'lobe-web-browsing____search____default',
+          },
+          id: 'call_1',
+          type: 'function',
+        },
+      ];
+
+      const manifests = {
+        'lobe-web-browsing': {
+          api: [{ description: 'Search web pages', name: 'search', parameters: {} }],
+          identifier: 'lobe-web-browsing',
+          meta: {},
+          type: 'builtin' as const,
+        },
+      };
+
+      const result = resolver.resolve(toolCalls, manifests);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].type).toBe('builtin');
+    });
+
     it('should handle empty tool calls array', () => {
       const result = resolver.resolve([], {});
       expect(result).toEqual([]);

@@ -47,12 +47,23 @@ export class ToolExecutionService {
     context: ToolExecutionContext,
   ): Promise<ToolExecutionResultResponse> {
     const { identifier, apiName, type } = payload;
+    const manifestType = context.toolManifestMap[identifier]?.type;
+    // Prefer manifest type when available to keep execution routing aligned with
+    // authoritative manifest metadata.
+    const resolvedType = (manifestType ?? type) as string | undefined;
 
-    log('Executing tool: %s:%s (type: %s)', identifier, apiName, type);
+    log(
+      'Executing tool: %s:%s (type: %s, manifestType: %s, resolvedType: %s)',
+      identifier,
+      apiName,
+      type,
+      manifestType,
+      resolvedType,
+    );
 
     const startTime = Date.now();
     try {
-      const typeStr = type as string;
+      const typeStr = resolvedType as string;
       let data: ToolExecutionResult;
       switch (typeStr) {
         case 'builtin': {
