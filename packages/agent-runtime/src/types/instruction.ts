@@ -209,14 +209,21 @@ export interface AgentInstructionResolveAbortedTools {
 
 /**
  * Instruction to execute context compression
- * When triggered, compresses ALL messages into a single MessageGroup summary
+ * When triggered, compresses historical messages into a MessageGroup summary
+ * while preserving the latest user input for direct answering.
  */
 export interface AgentInstructionCompressContext {
   payload: {
     /** Current token count before compression */
     currentTokenCount: number;
+    /** Compression threshold used in decision */
+    threshold: number;
     /** Existing summary to incorporate (for incremental compression) */
     existingSummary?: string;
+    /** Tail message IDs (from latest user message onward) to keep uncompressed */
+    preservedTailMessageIds?: string[];
+    /** Latest user message ID that must remain uncompressed */
+    preservedLatestUserMessageId?: string;
     /** Messages to compress */
     messages: any[];
   };

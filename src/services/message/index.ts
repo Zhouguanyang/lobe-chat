@@ -219,11 +219,39 @@ export class MessageService {
   // =============== Compression ===============
 
   /**
+   * Report context compression decision for server-side debug logging
+   */
+  logCompressionDecision = async (params: {
+    agentId?: string;
+    compressionEnabled: boolean;
+    currentTokenCount?: number;
+    groupId?: string;
+    maxWindowToken?: number;
+    messageCount: number;
+    needsCompression: boolean;
+    operationId: string;
+    phase: 'init' | 'user_input';
+    roleCount: Record<string, number>;
+    threshold?: number;
+    threadId?: string;
+    topicId?: string;
+  }): Promise<{ success: boolean }> => {
+    return lambdaClient.message.logCompressionDecision.mutate(params);
+  };
+
+  /**
    * Create a compression group for old messages
    * Returns placeholder group and messages to summarize
    */
   createCompressionGroup = async (params: {
     agentId: string;
+    debug?: {
+      currentTokenCount: number;
+      messageCount: number;
+      operationId: string;
+      stepCount: number;
+      threshold: number;
+    };
     groupId?: string | null;
     messageIds: string[];
     threadId?: string | null;

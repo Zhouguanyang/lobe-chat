@@ -18,6 +18,9 @@ import { MessageService } from '@/server/services/message';
 import { resolveAgentIdFromSession, resolveContext } from './_helpers/resolveContext';
 import { basicContextSchema } from './_schema/context';
 
+const COMPRESSION_TRIGGER_LOG_PREFIX = '[compression-trigger][server]';
+const COMPRESSION_DECISION_LOG_PREFIX = '[compression-decision][server]';
+
 const messageProcedure = authedProcedure.use(serverDatabase).use(async (opts) => {
   const { ctx } = opts;
 
@@ -46,6 +49,29 @@ export const messageRouter = router({
       const resolved = await resolveContext({ agentId, ...options }, ctx.serverDB, ctx.userId);
 
       return ctx.messageService.addFilesToMessage(id, fileIds, resolved);
+    }),
+
+  logCompressionDecision: messageProcedure
+    .input(
+      z.object({
+        agentId: z.string().optional(),
+        compressionEnabled: z.boolean(),
+        currentTokenCount: z.number().optional(),
+        groupId: z.string().optional(),
+        maxWindowToken: z.number().optional(),
+        messageCount: z.number(),
+        needsCompression: z.boolean(),
+        operationId: z.string(),
+        phase: z.enum(['init', 'user_input']),
+        roleCount: z.record(z.number()),
+        threshold: z.number().optional(),
+        threadId: z.string().optional(),
+        topicId: z.string().optional(),
+      }),
+    )
+    .mutation(async ({ input }) => {
+      console.info(`${COMPRESSION_DECISION_LOG_PREFIX}`, JSON.stringify(input, null, 2));
+      return { success: true };
     }),
 
   /**
@@ -113,6 +139,15 @@ createCompressionGroup: messageProcedure
     .input(
       z.object({
         agentId: z.string(),
+        debug: z
+          .object({
+            currentTokenCount: z.number(),
+            messageCount: z.number(),
+            operationId: z.string(),
+            stepCount: z.number(),
+            threshold: z.number(),
+          })
+          .optional(),
         groupId: z.string().nullable().optional(),
         messageIds: z.array(z.string()),
         threadId: z.string().nullable().optional(),
@@ -120,10 +155,27 @@ createCompressionGroup: messageProcedure
       }),
     )
     .mutation(async ({ input, ctx }) => {
-      const { topicId, messageIds, agentId, groupId, threadId } = input;
+      const { topicId, messageIds, agentId, groupId, threadId, debug } = input;
+
+      console.info(
+        `${COMPRESSION_TRIGGER_LOG_PREFIX}`,
+        JSON.stringify(
+          {
+            agentId,
+            debug,
+            groupId,
+            messageCountToCompress: messageIds.length,
+            threadId,
+            topicId,
+          },
+          null,
+          2,
+        ),
+      );
 
       return ctx.messageService.createCompressionGroup(topicId, messageIds, {
         agentId,
+        debug,
         groupId,
         threadId,
         topicId,

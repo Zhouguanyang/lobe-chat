@@ -26,6 +26,14 @@ import {
 } from '../types';
 import { shouldCompress } from '../utils/tokenCounter';
 
+const isServerRuntime = typeof globalThis === 'undefined' || !('window' in globalThis);
+const COMPRESSION_DECISION_PREFIX = '[compression-decision]';
+
+const logCompressionDecision = (payload: Record<string, unknown>) => {
+  if (!isServerRuntime) return;
+  console.info(`${COMPRESSION_DECISION_PREFIX}`, JSON.stringify(payload, null, 2));
+};
+
 /**
  * ChatAgent - The "Brain" of the chat agent
  *
@@ -311,6 +319,26 @@ export class GeneralChatAgent implements Agent {
   }
 
   /**
+   * Find tail message IDs from latest user message to the end.
+   * This keeps the latest question and the current in-flight assistant placeholder together.
+   */
+  private findPreservedTailMessageIds(messages: any[]): string[] {
+    let latestUserIndex = -1;
+
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const msg = messages[i];
+      if (msg.role === 'user' && msg.id) {
+        latestUserIndex = i;
+        break;
+      }
+    }
+
+    if (latestUserIndex === -1) return [];
+
+    return messages.slice(latestUserIndex).map((msg: any) => msg.id).filter(Boolean);
+  }
+
+  /**
    * Handle abort scenario - unified abort handling logic
    */
   private handleAbort(
@@ -353,23 +381,93 @@ export class GeneralChatAgent implements Agent {
       case 'user_input': {
         // Check if context compression is enabled and needed before calling LLM
         const compressionEnabled = this.config.compressionConfig?.enabled ?? true; // Default to enabled
+        const maxWindowToken = this.config.compressionConfig?.maxWindowToken ?? 128_000;
+        const roleCount = state.messages.reduce<Record<string, number>>((acc, msg: any) => {
+          acc[msg.role] = (acc[msg.role] || 0) + 1;
+          return acc;
+        }, {});
+
+        logCompressionDecision({
+          compressionEnabled,
+          maxWindowToken,
+          messageCount: state.messages.length,
+          operationId: state.operationId,
+          phase: context.phase,
+          roleCount,
+          status: state.status,
+        });
+
+        const emitCompressionDecision = (
+          payload: Parameters<NonNullable<GeneralAgentConfig['onCompressionDecision']>>[0],
+        ) => {
+          const onCompressionDecision = this.config.onCompressionDecision;
+          if (!onCompressionDecision) return;
+
+          try {
+            void Promise.resolve(onCompressionDecision(payload)).catch(() => {});
+          } catch {
+            // Ignore callback errors to avoid affecting runtime flow.
+          }
+        };
 
         if (compressionEnabled) {
           const compressionCheck = shouldCompress(state.messages, {
             maxWindowToken: this.config.compressionConfig?.maxWindowToken,
           });
 
+          const decisionPayload = {
+            compressionEnabled,
+            currentTokenCount: compressionCheck.currentTokenCount,
+            maxWindowToken,
+            messageCount: state.messages.length,
+            needsCompression: compressionCheck.needsCompression,
+            operationId: state.operationId,
+            phase: context.phase,
+            roleCount,
+            threshold: compressionCheck.threshold,
+          };
+
+          logCompressionDecision(decisionPayload);
+          emitCompressionDecision(decisionPayload);
+
           if (compressionCheck.needsCompression) {
-            // Context exceeds threshold, compress ALL messages into a single summary
+            const preservedTailMessageIds = this.findPreservedTailMessageIds(state.messages);
+            const latestUserMessageId = preservedTailMessageIds[0];
+
+            logCompressionDecision({
+              action: 'trigger_compress_context',
+              currentTokenCount: compressionCheck.currentTokenCount,
+              latestUserMessageId,
+              preservedTailMessageCount: preservedTailMessageIds.length,
+              operationId: state.operationId,
+              phase: context.phase,
+              threshold: compressionCheck.threshold,
+            });
+
+            // Context exceeds threshold, compress history while preserving latest user input
             return {
               payload: {
                 currentTokenCount: compressionCheck.currentTokenCount,
                 existingSummary: this.findExistingSummary(state.messages),
                 messages: state.messages,
+                preservedTailMessageIds,
+                preservedLatestUserMessageId: latestUserMessageId,
+                threshold: compressionCheck.threshold,
               },
               type: 'compress_context',
             } as AgentInstructionCompressContext;
           }
+        } else {
+          const decisionPayload = {
+            compressionEnabled,
+            maxWindowToken,
+            messageCount: state.messages.length,
+            needsCompression: false,
+            operationId: state.operationId,
+            phase: context.phase,
+            roleCount,
+          };
+          emitCompressionDecision(decisionPayload);
         }
 
         // User input received, call LLM to generate response
@@ -610,13 +708,12 @@ export class GeneralChatAgent implements Agent {
         // Context compression completed, continue to call LLM
         const compressionPayload = context.payload as GeneralAgentCompressionResultPayload;
 
-        // If compression was skipped (no messages to compress), just call LLM
-        // Otherwise, messages have been updated with compressed content
-        // Pass parentMessageId and createAssistantMessage=true to force new message creation
+        // Use current message-creation mode from runtime:
+        // - send/regenerate flows reuse the pre-created assistant message
+        // - other flows create a new assistant message as needed
         return {
           payload: {
-            // Force create new assistant message after compression
-            createAssistantMessage: true,
+            createAssistantMessage: false,
             messages: compressionPayload.compressedMessages,
             model: this.config.modelRuntimeConfig?.model,
             parentMessageId: compressionPayload.parentMessageId,

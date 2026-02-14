@@ -103,6 +103,61 @@ describe('tokenCounter', () => {
       // Should estimate since totalOutputTokens is 0
       expect(tokens).toBeGreaterThan(0);
     });
+
+    it('should ignore UI-only fields when estimating non-assistant messages', () => {
+      const messages = [
+        {
+          content: 'Hello from user',
+          createdAt: Date.now(),
+          id: 'msg_ui_only_fields',
+          role: 'user',
+          updatedAt: Date.now(),
+        },
+      ] as any;
+
+      const tokens = calculateMessageTokens(messages);
+      const expected = estimateTokens({
+        content: 'Hello from user',
+        role: 'user',
+      });
+
+      expect(tokens).toBe(expected);
+    });
+
+    it('should estimate assistant tool calls when output usage is missing', () => {
+      const messages = [
+        {
+          content: '',
+          role: 'assistant',
+          tool_calls: [
+            {
+              function: { arguments: '{"q":"token counter"}', name: 'search' },
+              id: 'call_1',
+              type: 'function',
+            },
+          ],
+        },
+      ] as any;
+
+      const tokens = calculateMessageTokens(messages);
+      expect(tokens).toBeGreaterThan(0);
+    });
+
+    it('should estimate tool messages from tool payload fields', () => {
+      const messages = [
+        {
+          content: '',
+          name: 'search',
+          plugin: { apiName: 'search', identifier: 'lobe-web-browsing' },
+          pluginState: { state: 'success' },
+          role: 'tool',
+          tool_call_id: 'call_1',
+        },
+      ] as any;
+
+      const tokens = calculateMessageTokens(messages);
+      expect(tokens).toBeGreaterThan(0);
+    });
   });
 
   describe('getCompressionThreshold', () => {

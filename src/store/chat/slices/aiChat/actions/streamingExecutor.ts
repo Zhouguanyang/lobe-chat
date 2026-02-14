@@ -673,6 +673,19 @@ export class StreamingExecutorActionImpl {
       },
       dynamicInterventionAudits,
       operationId: `${messageKey}/${params.parentMessageId}`,
+      onCompressionDecision: (decision) => {
+        void messageService
+          .logCompressionDecision({
+            ...decision,
+            agentId: agentId || undefined,
+            groupId: groupId || undefined,
+            threadId: threadId || undefined,
+            topicId: topicId || undefined,
+          })
+          .catch((error) => {
+            log('[internal_execAgentRuntime] report compression decision failed: %O', error);
+          });
+      },
       modelRuntimeConfig,
     });
 

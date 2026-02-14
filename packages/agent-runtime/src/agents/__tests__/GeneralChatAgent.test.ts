@@ -104,6 +104,80 @@ describe('GeneralChatAgent', () => {
     });
   });
 
+  describe('compression flow', () => {
+    it('should preserve latest user message ID when triggering compression', async () => {
+      const agent = new GeneralChatAgent({
+        agentConfig: { maxSteps: 100 },
+        compressionConfig: { enabled: true, maxWindowToken: 2 },
+        operationId: 'test-session',
+        modelRuntimeConfig: mockModelRuntimeConfig,
+      });
+
+      const state = createMockState({
+        messages: [
+          { id: 'user-1', role: 'user', content: 'Old question about architecture details.' },
+          { id: 'assistant-1', role: 'assistant', content: 'Old answer with many details.' },
+          {
+            id: 'user-latest',
+            role: 'user',
+            content:
+              'Please answer this latest question directly and do not summarize the whole history.',
+          },
+          {
+            id: 'assistant-latest',
+            role: 'assistant',
+            content: '',
+          },
+        ] as any,
+      });
+
+      const context = createMockContext('user_input', {
+        message: { content: 'latest', role: 'user' },
+      });
+
+      const result = await agent.runner(context, state);
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            messages: state.messages,
+            preservedTailMessageIds: ['user-latest', 'assistant-latest'],
+            preservedLatestUserMessageId: 'user-latest',
+          }),
+          type: 'compress_context',
+        }),
+      );
+    });
+
+    it('should not force createAssistantMessage when compression is skipped', async () => {
+      const agent = new GeneralChatAgent({
+        agentConfig: { maxSteps: 100 },
+        operationId: 'test-session',
+        modelRuntimeConfig: mockModelRuntimeConfig,
+      });
+
+      const state = createMockState();
+      const context = createMockContext('compression_result', {
+        compressedMessages: [{ id: 'user-latest', role: 'user', content: 'Latest question' }],
+        groupId: 'group-1',
+        parentMessageId: 'user-latest',
+        skipped: true,
+      });
+
+      const result = await agent.runner(context, state);
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            createAssistantMessage: false,
+            parentMessageId: 'user-latest',
+          }),
+          type: 'call_llm',
+        }),
+      );
+    });
+  });
+
   describe('llm_result phase', () => {
     it('should return finish when no tool calls', async () => {
       const agent = new GeneralChatAgent({

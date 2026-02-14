@@ -2226,22 +2226,76 @@ export const createAgentExecutors = (context: {
 
     /**
      * Context compression executor
-     * Compresses ALL messages into a single MessageGroup summary to reduce token usage
+     * Compresses historical messages into a MessageGroup summary while
+     * preserving the latest user question for direct answering.
      */
     compress_context: async (instruction, state) => {
       const sessionLogId = `${state.operationId}:${state.stepCount}`;
       const stagePrefix = `[${sessionLogId}][compress_context]`;
 
-      const { messages, currentTokenCount } = (instruction as AgentInstructionCompressContext)
-        .payload;
+      const {
+        messages,
+        currentTokenCount,
+        threshold,
+        preservedTailMessageIds: preservedTailIdsFromAgent,
+        preservedLatestUserMessageId,
+      } = (instruction as AgentInstructionCompressContext).payload;
+
+      const normalizePreservedTailIds = (
+        tailIds?: string[],
+        latestUserId?: string,
+      ): string[] => {
+        const ids = [...(tailIds || [])];
+        if (latestUserId && !ids.includes(latestUserId)) {
+          ids.unshift(latestUserId);
+        }
+
+        return [...new Set(ids.filter(Boolean))];
+      };
+
+      const preservedTailMessageIds = normalizePreservedTailIds(
+        preservedTailIdsFromAgent,
+        preservedLatestUserMessageId,
+      );
+      const preservedTailSet = new Set(preservedTailMessageIds);
+      const parentMessageIdForReply = preservedTailMessageIds[0] || preservedLatestUserMessageId;
+
+      const buildMessagesForLLM = (
+        allMessages: any[],
+        tailIds: string[],
+        fallbackMessages: any[],
+      ) => {
+        if (tailIds.length === 0) return allMessages;
+
+        const allMessageMap = new Map(allMessages.map((msg: any) => [msg.id, msg]));
+        const fallbackMessageMap = new Map(fallbackMessages.map((msg: any) => [msg.id, msg]));
+
+        const resolvedTailMessages: any[] = [];
+        const resolvedTailSet = new Set<string>();
+
+        for (const id of tailIds) {
+          const message = allMessageMap.get(id) ?? fallbackMessageMap.get(id);
+          if (!message || resolvedTailSet.has(id)) continue;
+          resolvedTailMessages.push(message);
+          resolvedTailSet.add(id);
+        }
+
+        if (resolvedTailMessages.length === 0) return allMessages;
+
+        const historicalMessages = allMessages.filter(
+          (msg: any) => !resolvedTailSet.has(msg.id as string),
+        );
+        return [...historicalMessages, ...resolvedTailMessages];
+      };
 
       // Get topicId from operation context (same as agentId)
       const { topicId } = getOperationContext();
 
       log(
-        `${stagePrefix} Starting compression. displayMessages=%d, tokens=%d`,
+        `${stagePrefix} Starting compression. displayMessages=%d, tokens=%d, threshold=%d`,
         messages.length,
         currentTokenCount,
+        threshold,
       );
 
       const events: AgentEvent[] = [];
@@ -2249,28 +2303,33 @@ export const createAgentExecutors = (context: {
       // Get message IDs from dbMessagesMap (raw db messages)
       const dbMessages = context.get().dbMessagesMap[context.messageKey] || [];
       const messageIds = dbMessages.map((m) => m.id).filter(Boolean);
+      const messageIdsToCompress = messageIds.filter((id) => !preservedTailSet.has(id));
 
-      if (!topicId || messageIds.length === 0) {
-        // No topicId or no messages, skip compression
+      if (!topicId || messageIdsToCompress.length === 0) {
+        // No topicId or no historical messages to compress, skip compression
         log(
-          `${stagePrefix} Skipping compression: topicId=%s, messageIds=%d`,
+          `${stagePrefix} Skipping compression: topicId=%s, messageIdsToCompress=%d, preservedTailMessageCount=%d`,
           topicId,
-          messageIds.length,
+          messageIdsToCompress.length,
+          preservedTailMessageIds.length,
         );
+        const messagesForLLM = buildMessagesForLLM(messages, preservedTailMessageIds, messages);
+
         return {
           events: [],
-          newState: state,
+          newState: { ...state, messages: messagesForLLM },
           nextContext: {
             payload: {
-              compressedMessages: messages,
+              compressedMessages: messagesForLLM,
               compressedTokenCount: currentTokenCount,
               groupId: '',
               originalTokenCount: currentTokenCount,
+              parentMessageId: parentMessageIdForReply,
               skipped: true,
             } as GeneralAgentCompressionResultPayload,
             phase: 'compression_result',
             session: {
-              messageCount: state.messages.length,
+              messageCount: messagesForLLM.length,
               sessionId: state.operationId,
               status: 'running',
               stepCount: state.stepCount + 1,
@@ -2284,17 +2343,19 @@ export const createAgentExecutors = (context: {
       const assistantMessageId = latestAssistantMessage?.id;
 
       log(
-        `${stagePrefix} Compressing %d db messages (display: %d), assistantMsgId=%s`,
+        `${stagePrefix} Compressing %d/%d db messages (display: %d), assistantMsgId=%s, preservedTailMessageCount=%d`,
+        messageIdsToCompress.length,
         messageIds.length,
         messages.length,
         assistantMessageId,
+        preservedTailMessageIds.length,
       );
 
       // Create compress_context operation and attach to the assistant message
       const { operationId: compressOperationId } = context.get().startOperation({
         context: { ...getOperationContext(), messageId: assistantMessageId },
         metadata: {
-          messageCount: messageIds.length,
+          messageCount: messageIdsToCompress.length,
           startTime: Date.now(),
         },
         parentOperationId: state.operationId,
@@ -2309,7 +2370,14 @@ export const createAgentExecutors = (context: {
         // 1. Create compression group with placeholder content
         const result = await messageService.createCompressionGroup({
           agentId,
-          messageIds,
+          debug: {
+            currentTokenCount,
+            messageCount: messageIdsToCompress.length,
+            operationId: state.operationId,
+            stepCount: state.stepCount,
+            threshold,
+          },
+          messageIds: messageIdsToCompress,
           topicId,
         });
         const { messageGroupId, messages: initialCompressedMessages, messagesToSummarize } = result;
@@ -2373,9 +2441,14 @@ export const createAgentExecutors = (context: {
         context.get().completeOperation(summaryOperationId);
 
         const compressedMessages = finalResult.messages || initialCompressedMessages;
+        const messagesForLLM = buildMessagesForLLM(
+          compressedMessages,
+          preservedTailMessageIds,
+          messages,
+        );
         const groupId = messageGroupId;
-        // Use the latest assistant message ID (before compression) as parentMessageId for next call_llm
-        const parentMessageId = assistantMessageId;
+        // Prefer the latest preserved user message as parent to answer the current question directly.
+        const parentMessageId = parentMessageIdForReply || assistantMessageId;
 
         // 6. Update UI with finalized messages (includes compressedGroup with summary)
         context.get().replaceMessages(compressedMessages, { context: opContext });
@@ -2396,10 +2469,10 @@ export const createAgentExecutors = (context: {
 
         return {
           events,
-          newState: { ...state, messages: compressedMessages },
+          newState: { ...state, messages: messagesForLLM },
           nextContext: {
             payload: {
-              compressedMessages,
+              compressedMessages: messagesForLLM,
               compressedTokenCount,
               groupId,
               originalTokenCount: currentTokenCount,
@@ -2407,7 +2480,7 @@ export const createAgentExecutors = (context: {
             } as GeneralAgentCompressionResultPayload,
             phase: 'compression_result',
             session: {
-              messageCount: compressedMessages.length,
+              messageCount: messagesForLLM.length,
               sessionId: state.operationId,
               status: 'running',
               stepCount: state.stepCount + 1,
@@ -2427,18 +2500,24 @@ export const createAgentExecutors = (context: {
 
         // On error, continue without compression
         events.push({ type: 'compression_error', error });
+        const fallbackMessagesForLLM = buildMessagesForLLM(
+          messages,
+          preservedTailMessageIds,
+          messages,
+        );
 
         return {
           events,
-          newState: state,
+          newState: { ...state, messages: fallbackMessagesForLLM },
           nextContext: {
             payload: {
-              compressedMessages: messages,
+              compressedMessages: fallbackMessagesForLLM,
+              parentMessageId: parentMessageIdForReply,
               skipped: true,
             } as GeneralAgentCompressionResultPayload,
             phase: 'compression_result',
             session: {
-              messageCount: state.messages.length,
+              messageCount: fallbackMessagesForLLM.length,
               sessionId: state.operationId,
               status: 'running',
               stepCount: state.stepCount + 1,

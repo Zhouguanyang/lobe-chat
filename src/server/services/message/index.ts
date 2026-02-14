@@ -18,6 +18,14 @@ interface QueryOptions {
   topicId?: string | null;
 }
 
+interface CompressionTriggerDebug {
+  currentTokenCount: number;
+  messageCount: number;
+  operationId: string;
+  stepCount: number;
+  threshold: number;
+}
+
 interface CreateMessageResult {
   id: string;
   messages: any[];
@@ -278,16 +286,26 @@ export class MessageService {
   async createCompressionGroup(
     topicId: string,
     messageIds: string[],
-    options?: QueryOptions,
+    options?: QueryOptions & { debug?: CompressionTriggerDebug },
   ): Promise<{
     messageGroupId: string;
     messages?: UIChatMessage[];
     messagesToSummarize: UIChatMessage[];
     success: boolean;
   }> {
+    const queryContext = options
+      ? {
+          agentId: options.agentId,
+          groupId: options.groupId,
+          sessionId: options.sessionId,
+          threadId: options.threadId,
+          topicId: options.topicId,
+        }
+      : undefined;
+
     // 1. Get messages that need to be summarized (before marking them as compressed)
     const allMessages = await this.messageModel.query(
-      { topicId, ...options },
+      { topicId, ...queryContext },
       this.getQueryOptions(),
     );
 
@@ -304,7 +322,10 @@ export class MessageService {
     });
 
     // 3. Query updated messages (compressed messages will be grouped)
-    const messages = await this.messageModel.query({ topicId, ...options }, this.getQueryOptions());
+    const messages = await this.messageModel.query(
+      { topicId, ...queryContext },
+      this.getQueryOptions(),
+    );
 
     return {
       messageGroupId,
